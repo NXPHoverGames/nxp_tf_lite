@@ -54,12 +54,18 @@ class NXPTFLite(Node):
         num_threads_descriptor = ParameterDescriptor(
             type=ParameterType.PARAMETER_INTEGER,
             description='Number of threads.')
-        camera_image_topic_descriptor = ParameterDescriptor(
+        camera_image_topic_0_descriptor = ParameterDescriptor(
             type=ParameterType.PARAMETER_STRING,
-            description='Camera image topic.')
-        output_topic_string_array_descriptor = ParameterDescriptor(
+            description='Camera 0 image topic.')
+        output_topic_0_string_array_descriptor = ParameterDescriptor(
             type=ParameterType.PARAMETER_STRING,
-            description='Topic name to publish inferences.')
+            description='Topic 0 name to publish inferences.')
+        camera_image_topic_1_descriptor = ParameterDescriptor(
+            type=ParameterType.PARAMETER_STRING,
+            description='Camera 1 image topic.')
+        output_topic_1_string_array_descriptor = ParameterDescriptor(
+            type=ParameterType.PARAMETER_STRING,
+            description='Topic 1 name to publish inferences.')
         use_gpu_inference_descriptor = ParameterDescriptor(
             type=ParameterType.PARAMETER_BOOL,
             description='Use GPU for inference boolean')
@@ -87,10 +93,14 @@ class NXPTFLite(Node):
             input_std_descriptor)
         self.declare_parameter("num_threads", 0,
             num_threads_descriptor)
-        self.declare_parameter("camera_image", "/NPU/image_raw", 
-            camera_image_topic_descriptor)
-        self.declare_parameter("topic_name", "TFLite", 
-            output_topic_string_array_descriptor)
+        self.declare_parameter("camera_image_0", "/NPU/image_raw", 
+            camera_image_topic_0_descriptor)
+        self.declare_parameter("camera_image_1", "/NPU/image_sim", 
+            camera_image_topic_1_descriptor)
+        self.declare_parameter("topic_name_0", "TFLiteReal", 
+            output_topic_0_string_array_descriptor)
+        self.declare_parameter("topic_name_1", "TFLiteSim", 
+            output_topic_1_string_array_descriptor)
         self.declare_parameter("gpu_inference", False, 
             use_gpu_inference_descriptor)
         self.declare_parameter("bbox_index", 0, 
@@ -107,8 +117,10 @@ class NXPTFLite(Node):
         self.inputMean = self.get_parameter("input_mean").value
         self.inputStd = self.get_parameter("input_std").value
         self.numberThreads = self.get_parameter("num_threads").value
-        self.cameraImageTopic = self.get_parameter("camera_image").value
-        self.inferenceTopicName = self.get_parameter("topic_name").value
+        self.cameraImageTopic0 = self.get_parameter("camera_image_0").value
+        self.inferenceTopicName0 = self.get_parameter("topic_name_0").value
+        self.cameraImageTopic1 = self.get_parameter("camera_image_1").value
+        self.inferenceTopicName1 = self.get_parameter("topic_name_1").value
         self.useGPUInference = self.get_parameter("gpu_inference").value
         self.boundingBoxIndex = int(self.get_parameter("bbox_index").value)
         self.classIndex = int(self.get_parameter("class_index").value)
@@ -127,10 +139,12 @@ class NXPTFLite(Node):
             os.environ["USE_GPU_INFERENCE"]="0"
         
         #Subscribers
-        self.imageSub = self.create_subscription(sensor_msgs.msg.Image, '{:s}'.format(self.cameraImageTopic), self.imageCallback, qos_profile_sensor_data)
+        self.imageSub0 = self.create_subscription(sensor_msgs.msg.Image, '{:s}'.format(self.cameraImageTopic0), self.imageCallback0, qos_profile_sensor_data)
+        self.imageSub1 = self.create_subscription(sensor_msgs.msg.Image, '{:s}'.format(self.cameraImageTopic1), self.imageCallback1, qos_profile_sensor_data)
 
         #Publishers
-        self.TFLitePub = self.create_publisher(TFLite,'{:s}'.format(self.inferenceTopicName), 0)
+        self.TFLitePub0 = self.create_publisher(TFLite,'{:s}'.format(self.inferenceTopicName0), 0)
+        self.TFLitePub1 = self.create_publisher(TFLite,'{:s}'.format(self.inferenceTopicName1), 0)
 
         with open(os.path.join(self.modelsPath, self.labelFile), 'r') as f:
             self.labels=[line.strip() for line in f.readlines()]
@@ -184,7 +198,7 @@ class NXPTFLite(Node):
         print(infoString)
         self.inferenceInitialized = True
 
-    def runTFLite(self, frame, image_header):
+    def runTFLite(self, frame, image_header, topic):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         if (frame.shape[0] != self.modelHeight) or (frame.shape[1] != self.modelWidth):
             frame = cv2.resize(frame, (self.modelWidth, self.modelHeight), interpolation = cv2.INTER_AREA)
@@ -225,16 +239,27 @@ class NXPTFLite(Node):
             inferenceArray.append(msgTFInference)
         msgTFLite.inference=inferenceArray
 
-        self.TFLitePub.publish(msgTFLite)
+        if int(topic) == 0:
+            self.TFLitePub0.publish(msgTFLite)
+        if int(topic) == 1:
+            self.TFLitePub1.publish(msgTFLite)
 
         return
 
-    def imageCallback(self, data):
+    def imageCallback0(self, data):
+        self.imageCallback(data, 0)
+        return
+
+    def imageCallback1(self, data):
+        self.imageCallback(data, 1)
+        return
+
+    def imageCallback(self, data, topic):
         scene = self.bridge.imgmsg_to_cv2(data, "bgr8")
         if not self.inferenceInitialized:
             inferenceReturn = self.loadTFLite(scene)
         else:
-            self.runTFLite(scene, data.header)
+            self.runTFLite(scene, data.header, topic)
         return
 
 
